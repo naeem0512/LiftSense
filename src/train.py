@@ -8,7 +8,7 @@ from typing import Dict, Tuple
 import numpy as np
 import pandas as pd
 from loguru import logger
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, classification_report, f1_score
 from sklearn.model_selection import train_test_split
 
 from .config import AppConfig, config
@@ -49,7 +49,8 @@ def train_baseline(
     preds = model.predict(X_test)
     metrics = evaluate_predictions(y_test, preds)
 
-    model_path = output_dir / "model.joblib"
+    model_path = cfg.artifacts.baseline
+    ensure_dir(model_path.parent)
     model.save(str(model_path))
 
     return metrics, {"report": model.report(X_test, y_test)}
@@ -83,7 +84,8 @@ def train_random_forest(
         seed=cfg.random_seed,
     )
 
-    model_path = output_dir / "model.joblib"
+    model_path = cfg.artifacts.random_forest
+    ensure_dir(model_path.parent)
     model.save(model_path)
 
     return metrics, {"report": model.report(X_test, y_test)}
@@ -109,7 +111,7 @@ def train_bilstm(
     )
 
     model = BiLSTMModel.create((X.shape[1], X.shape[2]), cfg.training.lr)
-    history = model.fit(
+    history_info = model.fit(
         X_train,
         y_train,
         X_val,
@@ -123,10 +125,18 @@ def train_bilstm(
     preds = model.predict(X_val)
     metrics = evaluate_predictions(y_val, preds)
 
-    model_path = output_dir / "model.h5"
+    model_path = cfg.artifacts.bilstm
+    ensure_dir(model_path.parent)
     model.save(model_path)
 
-    return metrics, {"history": history["history"]}
+    report = classification_report(y_val, preds, output_dict=True)
+    extras = {
+        "history": history_info["history"],
+        "plot_path": history_info["plot_path"],
+        "report": report,
+    }
+
+    return metrics, extras
 
 
 def main() -> None:

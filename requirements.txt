@@ -7,4 +7,5 @@ dash-bootstrap-components
 plotly
 joblib
 pydantic
+pydantic-settings
 loguru

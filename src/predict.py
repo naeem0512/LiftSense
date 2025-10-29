@@ -20,14 +20,14 @@ from .persistence import ensure_dir, save_json
 
 
 MODEL_PATHS = {
-    "baseline": "results/model.joblib",
-    "random_forest": "results/model.joblib",
-    "bilstm": "results/model.h5",
+    "baseline": config.artifacts.baseline,
+    "random_forest": config.artifacts.random_forest,
+    "bilstm": config.artifacts.bilstm,
 }
 
 
-def load_model(model_type: str):
-    path = Path(MODEL_PATHS[model_type])
+def load_model(model_type: str, model_path: Optional[Path] = None):
+    path = Path(model_path) if model_path else Path(MODEL_PATHS[model_type])
     if not path.exists():
         raise FileNotFoundError(f"Model file not found at {path}. Train the model first.")
     if model_type == "baseline":
@@ -45,8 +45,10 @@ def run_prediction(
     model_type: str,
     window_size: int,
     stride: int,
+    model_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    model = load_model(model_type)
+    artifact_path = Path(model_path) if model_path else Path(MODEL_PATHS[model_type])
+    model = load_model(model_type, artifact_path)
     feature_df = build_features(df)
 
     if model_type == "bilstm":
@@ -59,12 +61,26 @@ def run_prediction(
         preds = model.predict(X)
         probs = model.predict_proba(X)
 
+    distribution = (
+        pd.Series(preds).value_counts().sort_index().rename_axis("fatigue_class")
+    )
+
     summary = {
         "model": model_type,
         "num_reps": int(df.shape[0]),
         "predictions": preds.tolist(),
         "probabilities_head": probs[:5].tolist(),
         "feature_means": feature_df.mean().to_dict(),
+        "class_distribution": {
+            str(int(k)): {"count": int(v), "ratio": float(v / len(preds))}
+            for k, v in distribution.items()
+        },
+        "artifact_path": str(artifact_path),
+        "window": {
+            "size": window_size,
+            "stride": stride,
+            "applied": model_type == "bilstm",
+        },
     }
 
     ensure_dir(cfg.output_dir)
@@ -78,6 +94,7 @@ def main() -> None:
     group.add_argument("--simulate", type=int, help="Simulate a session when set to 1")
     group.add_argument("--csv", type=Path, help="Path to CSV containing session data")
     parser.add_argument("--model", choices=["baseline", "random_forest", "bilstm"], required=True)
+    parser.add_argument("--model-path", type=Path, help="Override the saved model path")
     parser.add_argument("--window-size", type=int, default=config.windowing.window_size)
     parser.add_argument("--stride", type=int, default=config.windowing.stride)
     args = parser.parse_args()
@@ -91,7 +108,14 @@ def main() -> None:
     else:
         raise ValueError("Either --simulate 1 or --csv must be provided")
 
-    result = run_prediction(cfg, df, args.model, args.window_size, args.stride)
+    result = run_prediction(
+        cfg,
+        df,
+        args.model,
+        args.window_size,
+        args.stride,
+        model_path=args.model_path,
+    )
     logger.info("Prediction summary saved: {}", json.dumps(result, indent=2))
 
 

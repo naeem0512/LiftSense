@@ -5,7 +5,7 @@ import json
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Deque, Dict, List
+from typing import Any, Deque, Dict, List, Optional
 
 import numpy as np
 
@@ -21,7 +21,7 @@ from .models.random_forest import RandomForestModel
 class SlidingWindowPredictor:
     window_size: int
     stride: int
-    model
+    model: Any
     feature_list: List[str] = field(default_factory=lambda: FEATURE_COLUMNS)
     buffer: Deque[Dict[str, float]] = field(init=False)
     step_count: int = field(default=0, init=False)
@@ -46,22 +46,37 @@ class SlidingWindowPredictor:
         return {"prediction": prediction, "probabilities": probs.tolist()}
 
 
-def load_model(model_type: str):
+def load_model(model_type: str, model_path: Optional[Path] = None):
+    artifact_map = {
+        "bilstm": config.artifacts.bilstm,
+        "baseline": config.artifacts.baseline,
+        "random_forest": config.artifacts.random_forest,
+    }
+    path = Path(model_path) if model_path else Path(artifact_map[model_type])
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Model artifact not found at {path}. Train the model first or provide --model-path."
+        )
     if model_type == "bilstm":
-        return BiLSTMModel.load(Path("results/model.h5"))
+        return BiLSTMModel.load(path), path
     if model_type == "baseline":
-        return BaselineModel.load("results/model.joblib")
+        return BaselineModel.load(str(path)), path
     if model_type == "random_forest":
-        return RandomForestModel.load(Path("results/model.joblib"))
+        return RandomForestModel.load(path), path
     raise ValueError(f"Unsupported model type: {model_type}")
 
 
-def stream_predictions(model_type: str, window_size: int, stride: int) -> List[Dict[str, float]]:
+def stream_predictions(
+    model_type: str,
+    window_size: int,
+    stride: int,
+    model_path: Optional[Path] = None,
+) -> Dict[str, Any]:
     session = simulate_session(config, save_plot=False).dataframe
     features = build_features(session)
     records = features.to_dict(orient="records")
 
-    model = load_model(model_type)
+    model, artifact = load_model(model_type, model_path)
     predictor = SlidingWindowPredictor(window_size, stride, model)
 
     outputs: List[Dict[str, float]] = []
@@ -69,18 +84,26 @@ def stream_predictions(model_type: str, window_size: int, stride: int) -> List[D
         result = predictor.push(rep)
         if result:
             outputs.append(result)
-    return outputs
+    return {
+        "model": model_type,
+        "artifact_path": str(artifact),
+        "window": {"size": window_size, "stride": stride},
+        "num_predictions": len(outputs),
+        "emissions": outputs,
+    }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Real-time windowed predictions")
     parser.add_argument("--model", choices=["baseline", "random_forest", "bilstm"], required=True)
+    parser.add_argument("--model-path", type=Path, help="Override the saved model path")
     parser.add_argument("--window-size", type=int, default=config.windowing.window_size)
     parser.add_argument("--stride", type=int, default=config.windowing.stride)
     args = parser.parse_args()
 
-    outputs = stream_predictions(args.model, args.window_size, args.stride)
-    print(json.dumps(outputs[:5], indent=2))
+    outputs = stream_predictions(args.model, args.window_size, args.stride, args.model_path)
+    preview = {**outputs, "emissions": outputs["emissions"][:5]}
+    print(json.dumps(preview, indent=2))
 
 
 if __name__ == "__main__":

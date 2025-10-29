@@ -1,7 +1,8 @@
 from pathlib import Path
 from typing import Tuple
 
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class SimulationConfig(BaseSettings):
@@ -29,12 +30,19 @@ class TrainingConfig(BaseSettings):
     patience: int = Field(4, description="Early stopping patience")
 
 
+class ArtifactConfig(BaseSettings):
+    baseline: Path = Field(Path("results/baseline_model.joblib"), description="Baseline model artifact")
+    random_forest: Path = Field(Path("results/random_forest_model.joblib"), description="Random Forest model artifact")
+    bilstm: Path = Field(Path("results/bilstm_model.h5"), description="Bi-LSTM model artifact")
+
+
 class AppConfig(BaseSettings):
     random_seed: int = Field(42, description="Global random seed")
     output_dir: Path = Field(Path("results"), description="Output directory")
     simulation: SimulationConfig = SimulationConfig()
     windowing: WindowConfig = WindowConfig()
     training: TrainingConfig = TrainingConfig()
+    artifacts: ArtifactConfig = ArtifactConfig()
 
 
 config = AppConfig()
